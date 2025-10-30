@@ -656,6 +656,8 @@ param_dist_recall = {
     'reg_lambda': [1, 1.5, 2]
 }
 
+from sklearn.model_selection import RandomizedSearchCV
+
 random_search_recall = RandomizedSearchCV(
     estimator=xgb_recall,
     param_distributions=param_dist_recall,
@@ -667,10 +669,7 @@ random_search_recall = RandomizedSearchCV(
 )
 
 random_search_recall.fit(
-    X_train, y_train,
-    eval_set=[(X_test, y_test)],
-    early_stopping_rounds=30,
-    verbose=False
+    X_train, y_train
 )
 
 best_xgb_recall = random_search_recall.best_estimator_
@@ -684,32 +683,145 @@ print("Recall:", recall_score(y_test, y_pred_recall))
 print("F1 Score:", f1_score(y_test, y_pred_recall))
 print("\nClassification Report:\n", classification_report(y_test, y_pred_recall))
 
+# --- Métricas XGBoost ---
+acc_xgb = accuracy_score(y_test, y_pred_xgb)
+prec_xgb = precision_score(y_test, y_pred_xgb)
+rec_xgb = recall_score(y_test, y_pred_xgb)
+f1_xgb = f1_score(y_test, y_pred_xgb)
 
-### compararlos
+print("\n================= COMPARACIÓN FINAL ENTRE MODELOS =================")
+print(f"{'Métrica':<15}{'Decision Tree':<18}{'Random Forest':<18}{'XGBoost'}")
+print(f"{'Accuracy':<15}{acc_tree:<18.4f}{acc_rf:<18.4f}{acc_xgb:.4f}")
+print(f"{'Precision':<15}{prec_tree:<18.4f}{prec_rf:<18.4f}{prec_xgb:.4f}")
+print(f"{'Recall':<15}{rec_tree:<18.4f}{rec_rf:<18.4f}{rec_xgb:.4f}")
+print(f"{'F1-Score':<15}{f1_tree:<18.4f}{f1_rf:<18.4f}{f1_xgb:.4f}")
 
-def evaluate_model(name, model, X_test, y_test, results):
-    y_pred = model.predict(X_test)
-    results.append({
-        "Modelo": name,
-        "Accuracy": accuracy_score(y_test, y_pred),
-        "Precision": precision_score(y_test, y_pred),
-        "Recall": recall_score(y_test, y_pred),
-        "F1-Score": f1_score(y_test, y_pred)
-    })
+# --- Visualización de comparación ---
+labels = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+tree_scores = [acc_tree, prec_tree, rec_tree, f1_tree]
+rf_scores = [acc_rf, prec_rf, rec_rf, f1_rf]
+xgb_scores = [acc_xgb, prec_xgb, rec_xgb, f1_xgb]
 
-    results = []
+x = np.arange(len(labels))
+width = 0.25
 
-# Evaluar modelos existentes
-evaluate_model("Decision Tree", tree_model, X_test, y_test, results)
-evaluate_model("Random Forest", rf_model, X_test, y_test, results)
-evaluate_model("XGBoost Base", xgb_base, X_test, y_test, results)
-evaluate_model("XGBoost Optimizado", best_xgb, X_test, y_test, results)
+fig, ax = plt.subplots(figsize=(9,5))
+bars1 = ax.bar(x - width, tree_scores, width, label='Decision Tree')
+bars2 = ax.bar(x, rf_scores, width, label='Random Forest')
+bars3 = ax.bar(x + width, xgb_scores, width, label='XGBoost')
 
-# Evaluar nuevo modelo enfocado en Recall & F1
-evaluate_model("XGBoost Recall/F1", best_xgb_recall, X_test, y_test, results)
+ax.set_ylabel('Puntaje')
+ax.set_title('Comparación de métricas entre modelos')
+ax.set_xticks(x)
+ax.set_xticklabels(labels)
+ax.legend()
 
-# Mostrar tabla de resultados
-import pandas as pd
-df_results = pd.DataFrame(results)
-print("\n==================== COMPARACIÓN FINAL ====================")
-print(df_results.to_string(index=False))
+for bars in [bars1, bars2, bars3]:
+    for bar in bars:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=8)
+
+plt.tight_layout()
+plt.show()
+
+#----------------------------------- OPTIMIZACION HIPER PARAMETROS
+
+from sklearn.model_selection import GridSearchCV
+
+param_grid_xgb = {
+    'n_estimators': [100, 200, 300],
+    'learning_rate': [0.01, 0.05, 0.1],
+    'max_depth': [3, 4, 5],
+    'subsample': [0.7, 0.8, 1.0],
+    'colsample_bytree': [0.7, 0.8, 1.0]
+}
+
+grid_search_xgb = GridSearchCV(
+    XGBClassifier(
+        random_state=42,
+        eval_metric='logloss',
+        use_label_encoder=False
+    ),
+    param_grid_xgb,
+    cv=5,
+    scoring='accuracy',
+    n_jobs=-1
+)
+
+grid_search_xgb.fit(X_train, y_train)
+
+print("\nMejores hiperparámetros XGBoost:")
+print(grid_search_xgb.best_params_)
+
+# Evaluar mejor modelo
+best_xgb = grid_search_xgb.best_estimator_
+y_pred_best_xgb = best_xgb.predict(X_test)
+
+print("\nEvaluación del XGBoost optimizado:")
+print("Accuracy:", accuracy_score(y_test, y_pred_best_xgb))
+print(classification_report(y_test, y_pred_best_xgb))
+
+# Guardar modelo
+joblib.dump(best_xgb, "xgboost_optimized.pkl")
+print("\nModelo XGBoost guardado como 'xgboost_optimized.pkl'")
+
+#----------------------------------- OPTIMIZACION HIPERPARÁMETROS XGBOOST
+
+from sklearn.model_selection import GridSearchCV
+from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+import joblib
+
+param_grid_xgb = {
+    'n_estimators': [100, 200, 300],     # número de árboles
+    'learning_rate': [0.01, 0.05, 0.1],  # velocidad de aprendizaje
+    'max_depth': [3, 4, 5],              # profundidad del árbol
+    'subsample': [0.7, 0.8, 1.0],        # fracción de filas
+    'colsample_bytree': [0.7, 0.8, 1.0]  # fracción de columnas
+}
+
+xgb_model = XGBClassifier(
+    random_state=42,
+    eval_metric='logloss'
+)
+
+grid_search_xgb = GridSearchCV(
+    estimator=xgb_model,
+    param_grid=param_grid_xgb,
+    cv=3,                 # 5 es más preciso pero más lento
+    scoring='accuracy',
+    n_jobs=-1,
+    verbose=1
+)
+
+grid_search_xgb.fit(X_train, y_train)
+
+print("\nMejores hiperparámetros de XGBoost:")
+print(grid_search_xgb.best_params_)
+
+best_xgb = grid_search_xgb.best_estimator_
+y_pred_best_xgb = best_xgb.predict(X_test)
+
+print("\nEvaluación XGBoost Optimizado:")
+print("Accuracy:", accuracy_score(y_test, y_pred_best_xgb))
+print(classification_report(y_test, y_pred_best_xgb))
+
+# Guardar modelo
+joblib.dump(best_xgb, "xgboost_optimized.pkl")
+print("\nModelo XGBoost guardado como 'xgboost_optimized.pkl'")
+
+#------------------------- COMPARACIÓN FINAL ENTRE LOS 3 MODELOS
+
+models = {
+    "Decision Tree": (y_pred_best),
+    "Random Forest": (y_pred_best_rf),
+    "XGBoost": (y_pred_best_xgb)
+}
+
+print("\n=========== COMPARACIÓN FINAL MODELOS ===========")
+for name, y_pred in models.items():
+    print(f"\n📌 Modelo: {name}")
+    print(f"Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
+    print(f"Precision: {precision_score(y_test, y_pred):.4f}")
+    print(f"Recall:    {recall_score(y_test, y_pred):.4f}")
+    print(f"F1 Score:  {f1_score(y_test, y_pred):.4f}")
